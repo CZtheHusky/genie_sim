@@ -37,12 +37,12 @@ uses container-internal VNC/noVNC startup scripts.
 ## Files Added
 
 - `Dockerfile.dsw`: DSW-native image based on Isaac Sim 5.1.0 with ROS Jazzy,
-  Genie Sim dependencies, repo source, editable install, TigerVNC/noVNC/XFCE,
-  and DSW entry scripts.
+  Genie Sim dependencies, repo source, editable install,
+  TurboVNC/VirtualGL/libjpeg-turbo/noVNC/XFCE, and DSW entry scripts.
 - `docker/dsw_entrypoint.sh`: lightweight runtime entrypoint. It exports Genie
   Sim, Isaac Sim, and ROS variables, creates writable runtime directories, and
   starts the requested command.
-- `docker/start_vnc.sh`: starts XFCE on VNC display `:1` and exposes noVNC on
+- `docker/start_vnc.sh`: starts XFCE on TurboVNC display `:0` and exposes noVNC on
   port `6080`.
 - `docker/start_geniesim_gui.sh`: starts `source/geniesim/app/app.py` through
   `/isaac-sim/python.sh`, defaulting to `source/geniesim/config/s2r_organize_items.yaml`
@@ -130,8 +130,8 @@ start_vnc.sh
 
 The script starts:
 
-- VNC display: `:1`
-- VNC port: `5901`
+- VNC display: `:0`
+- VNC port: `5900`
 - noVNC/websockify port: `6080`
 - XFCE desktop
 
@@ -144,10 +144,10 @@ export VNC_PASSWORD='your-password'
 start_vnc.sh
 ```
 
-This image currently uses TigerVNC from Ubuntu packages for reliability. To
-switch to TurboVNC later, add the TurboVNC `.deb` install to `Dockerfile.dsw`
-and replace the `vncserver` command in `docker/start_vnc.sh` with TurboVNC's
-server command. The noVNC/websockify port model can stay the same.
+This image follows the internal TurboVNC flow: it installs TurboVNC,
+libjpeg-turbo, VirtualGL, `xfce4-goodies`, `mesa-utils`, and `x11-xserver-utils`
+from the TurboVNC/libjpeg-turbo/VirtualGL apt repositories. noVNC remains on top
+of TurboVNC so DSW can expose a browser-accessible service on port `6080`.
 
 ## Verify Environment
 
