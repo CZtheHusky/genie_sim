@@ -1,0 +1,155 @@
+# syntax=docker/dockerfile:1.7
+
+# DSW-native Genie Sim image.
+# Build this image in an environment that can run Docker, then use the pushed
+# ACR image as an Aliyun DSW Custom Image. Do not build it inside DSW.
+FROM nvcr.io/nvidia/isaac-sim:5.1.0
+
+ENV ACCEPT_EULA=Y \
+    PRIVACY_CONSENT=Y \
+    DEBIAN_FRONTEND=noninteractive \
+    SIM_REPO_ROOT=/geniesim/main \
+    SIM_ASSETS=/geniesim/main/source/geniesim/assets \
+    ENABLE_SIM=1 \
+    ISAACSIM_HOME=/isaac-sim \
+    ROS_DISTRO=jazzy \
+    ROS_VERSION=2 \
+    ROS_PYTHON_VERSION=3 \
+    ROS_LOCALHOST_ONLY=1 \
+    RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
+    ROS_CMD_DISTRO=jazzy \
+    VNC_GEOMETRY=1920x1080 \
+    VNC_DISPLAY=:1
+
+USER root
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    wget \
+    curl \
+    git \
+    git-lfs \
+    sudo \
+    lsb-release \
+    unzip \
+    xterm \
+    build-essential \
+    cmake \
+    libeigen3-dev \
+    ffmpeg \
+    jq \
+    vim \
+    acl \
+    python3 python3-pip python3-venv \
+    libvulkan1 vulkan-tools \
+    libx11-6 libxrandr2 libxss1 libxcursor1 libxi6 libglu1-mesa \
+    libgl1 libegl1 libnss3 libxcomposite1 libxdamage1 libxext6 \
+    liburing2 liburing-dev \
+    locales \
+    software-properties-common \
+    graphviz libgraphviz-dev \
+    xfce4 xfce4-terminal dbus-x11 x11-xserver-utils \
+    tigervnc-standalone-server tigervnc-common \
+    novnc websockify \
+    && locale-gen en_US en_US.UTF-8 \
+    && update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \
+    && add-apt-repository universe -y
+
+RUN usermod -aG sudo isaac-sim \
+    && echo "isaac-sim ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/isaac-sim \
+    && chmod 0440 /etc/sudoers.d/isaac-sim
+
+RUN curl -L -o /tmp/ros2-apt-source.deb \
+    "https://github.com/ros-infrastructure/ros-apt-source/releases/download/1.1.0/ros2-apt-source_1.1.0.noble_all.deb" \
+    && dpkg -i /tmp/ros2-apt-source.deb \
+    && rm -f /tmp/ros2-apt-source.deb
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-desktop \
+    ros-jazzy-rmw-cyclonedds-cpp \
+    ros-jazzy-vision-msgs-rviz-plugins \
+    ros-jazzy-joy \
+    ros-dev-tools
+
+RUN mkdir -p \
+    /geniesim/main \
+    /geniesim/generator_env \
+    /geniesim/record_env \
+    /geniesim/teleop_env \
+    /isaac-sim/.cache \
+    /isaac-sim/.nv/ComputeCache \
+    /isaac-sim/.nvidia-omniverse/logs \
+    /isaac-sim/.nvidia-omniverse/config \
+    /isaac-sim/.local/share/ov/data \
+    /isaac-sim/.local/share/ov/pkg \
+    && chown -R 1234:1234 /geniesim /isaac-sim/.cache /isaac-sim/.nv /isaac-sim/.nvidia-omniverse /isaac-sim/.local
+
+WORKDIR /geniesim/main
+
+COPY --chown=1234:1234 requirements.txt /tmp/requirements.txt
+COPY --chown=1234:1234 source/geniesim/generator/requirements.txt /tmp/requirements.generator.txt
+COPY --chown=1234:1234 source/teleop/requirements.txt /tmp/requirements.teleop.txt
+
+USER 1234:1234
+
+RUN --mount=type=cache,target=/home/isaac-sim/.cache/pip,uid=1234,gid=1234 \
+    /isaac-sim/python.sh -m pip install -U pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && /isaac-sim/python.sh -m pip install -r /tmp/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+RUN python3 -m venv /geniesim/generator_env
+RUN --mount=type=cache,target=/home/isaac-sim/.cache/pip,uid=1234,gid=1234 \
+    /geniesim/generator_env/bin/pip install -U pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && /geniesim/generator_env/bin/pip install -r /tmp/requirements.generator.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+RUN python3 -m venv /geniesim/record_env
+RUN --mount=type=cache,target=/home/isaac-sim/.cache/pip,uid=1234,gid=1234 \
+    /geniesim/record_env/bin/pip install -U pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && /geniesim/record_env/bin/pip install rosbags pyyaml opencv-python rosbags.image "numpy<2.0" -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+RUN python3 -m venv /geniesim/teleop_env
+RUN --mount=type=cache,target=/home/isaac-sim/.cache/pip,uid=1234,gid=1234 \
+    /geniesim/teleop_env/bin/pip install -U pip -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    && /geniesim/teleop_env/bin/pip install -r /tmp/requirements.teleop.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+COPY --chown=1234:1234 . /geniesim/main
+
+RUN mkdir -p /geniesim/main/source/geniesim/assets \
+    && if [ ! -f /geniesim/main/source/geniesim/assets/__init__.py ]; then \
+        printf '%s\n' \
+        'from __future__ import annotations' \
+        'import json' \
+        'import os' \
+        'from pathlib import Path' \
+        'ASSETS_PATH = os.environ.get("SIM_ASSETS", str(Path(__file__).resolve().parent))' \
+        'def _load_assets_index():' \
+        '    for filename in ("assets_index.json", "index.json"):' \
+        '        path = Path(ASSETS_PATH) / filename' \
+        '        if path.is_file():' \
+        '            with path.open("r", encoding="utf-8") as f:' \
+        '                return json.load(f)' \
+        '    return {}' \
+        'ASSETS_INDEX = _load_assets_index()' \
+        'ASSETS_INDEX_HASH = str(hash(json.dumps(ASSETS_INDEX, sort_keys=True)))' \
+        > /geniesim/main/source/geniesim/assets/__init__.py; \
+    fi
+
+RUN --mount=type=cache,target=/home/isaac-sim/.cache/pip,uid=1234,gid=1234 \
+    /isaac-sim/python.sh -m pip install /geniesim/main/3rdparty/ik_solver-0.4.3-cp311-cp311-linux_x86_64.whl \
+    && /isaac-sim/python.sh -m pip install -e /geniesim/main/source
+
+USER root
+RUN ln -sf /geniesim/main/docker/dsw_entrypoint.sh /usr/local/bin/dsw_entrypoint.sh \
+    && ln -sf /geniesim/main/docker/start_vnc.sh /usr/local/bin/start_vnc.sh \
+    && ln -sf /geniesim/main/docker/start_geniesim_gui.sh /usr/local/bin/start_geniesim_gui.sh \
+    && ln -sf /geniesim/main/docker/start_geniesim_headless.sh /usr/local/bin/start_geniesim_headless.sh \
+    && chmod +x /geniesim/main/docker/*.sh
+
+USER 1234:1234
+WORKDIR /geniesim/main
+
+ENTRYPOINT ["/usr/local/bin/dsw_entrypoint.sh"]
+CMD ["bash"]
